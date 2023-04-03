@@ -1,12 +1,42 @@
+
+# import sys
+# sys.path.insert(0, '/home/shx1/catkin_ws_pacejka/src/rosbag2')
 import numpy as np
-import rospy
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 from scipy.optimize import Bounds
-import rosbag   
-from sensor_msgs.msg import Imu
-from nav_msgs.msg import Odometry
-from ackermann_msgs.msg import AckermannDrive
+# from sensor_msgs.msg import Imu
+# from nav_msgs.msg import Odometry
+# from ackermann_msgs.msg import AckermannDrive
+# from ackermann_msgs.msg import AckermannDriveStamped
+import sqlite3
+from rosidl_runtime_py.utilities import get_message
+from rclpy.serialization import deserialize_message
+
+class BagFileParser():
+    def __init__(self, bag_file):
+        self.conn = sqlite3.connect(bag_file)
+        self.cursor = self.conn.cursor()
+
+        ## create a message type map
+        topics_data = self.cursor.execute("SELECT id, name, type FROM topics").fetchall()
+        self.topic_type = {name_of:type_of for id_of,name_of,type_of in topics_data}
+        self.topic_id = {name_of:id_of for id_of,name_of,type_of in topics_data}
+        self.topic_msg_message = {name_of:get_message(type_of) for id_of,name_of,type_of in topics_data}
+
+    def __del__(self):
+        self.conn.close()
+
+    # Return [(timestamp0, message0), (timestamp1, message1), ...]
+    def get_messages(self, topic_name):
+
+        topic_id = self.topic_id[topic_name]
+        # Get from the db
+        rows = self.cursor.execute("SELECT timestamp, data FROM messages WHERE topic_id = {}".format(topic_id)).fetchall()
+        # Deserialise all and timestamp them
+        return [ (timestamp,deserialize_message(data, self.topic_msg_message[topic_name])) for timestamp,data in rows]
+
+
 
 # Function to calculate lateral force using Pacejka model
 def pacejka_model(alpha, mu, Fz, B, C, D, E):
@@ -88,98 +118,82 @@ def least_squares(x, alpha, Fy, mu, Fz, lr, lf, h_cg, mass):
     return np.sum(residual ** 2)
 
 
-
 if __name__ == '__main__':
-    # Load ROS data
-    bag = rosbag.Bag('/home/shx1/shtest1_2023-04-02-12-55-32.bag')
-    topic_1 = '/imu' 
-    topic_2 = '/vesc/odom'
-    topic_3 = '/vesc/low_level/ackermann_cmd_mux/output' # topic_3 have to contain steering angle.
 
-    # Determine the longer and shorter topics
-    length_1 = bag.get_message_count(topic_filters=[topic_1])
-    length_2 = bag.get_message_count(topic_filters=[topic_2])
+    bag_file = '/home/shx1/rosbag/sh_test2/sh_test2_0.db3'
+    parser = BagFileParser(bag_file)
 
-    if length_1 >= length_2:
-        longer_topic = topic_1
-        shorter_topic = topic_2
-    else:
-        longer_topic = topic_2
-        shorter_topic = topic_1
+    topic_1 = '/odom' # topic_1 have to be odom including vel_x, vel_y
+    topic_2 = '/imu/data' # topic_2 have to be imu
+    topic_3 = '/ackermann_cmd'  # topic_3 have to contain steering angle.
 
-  # Create lists to store matching messages for different topics
-  # since, frequency of each topic is different.
+    odom_msgs = parser.get_messages(topic_1)
+    imu_msgs = parser.get_messages(topic_2)
+    steer_msgs = parser.get_messages(topic_3)
+
     matching_msgs_topic1 = []
     matching_msgs_topic2 = []
     matching_msgs_topic3 = []
 
-    for short_msg in bag.read_messages(topics=[shorter_topic]):
-        short_timestamp = short_msg.timestamp
-        closest_diff = float('inf')
-        closest_msg = None
+    for odom_msg in odom_msgs:
+        odom_timestamp_sec  = odom_msg[1].header.stamp.sec
+        odom_timestamp_nsec = odom_msg[1].header.stamp.nanosec*(0.000000001)
+        odom_timestamp      = odom_timestamp_sec+odom_timestamp_nsec
 
-        for long_msg in bag.read_messages(topics=[longer_topic],start_time=short_timestamp-rospy.Duration(1)):
-            long_timestamp = long_msg.timestamp
-            timestamp_diff = abs(short_timestamp.to_sec() - long_timestamp.to_sec())
+        closest_diff = float('inf')
+        closest_imu_msg = None
+        for imu_msg in imu_msgs:
+            imu_timestamp_sec  =  imu_msg[1].header.stamp.sec
+            imu_timestamp_nsec =  imu_msg[1].header.stamp.nanosec*(0.000000001)
+            imu_timestamp      =  imu_timestamp_sec+imu_timestamp_nsec
+            timestamp_diff     = abs(odom_timestamp - odom_timestamp)
 
             if timestamp_diff < closest_diff:
                 closest_diff = timestamp_diff
-                closest_msg = long_msg
+                closest_imu_msg = imu_msg
 
             if timestamp_diff > closest_diff:
                 break
 
-        closest_diff2 = float('inf')
-        closest_msg2 = None
+        closest_diff = float('inf')
+        closest_steer_msg = None
 
-        for steer_msg in bag.read_messages(topics=[topic_3],start_time=short_timestamp-rospy.Duration(1)):
-            steer_timestamp = steer_msg.timestamp
-            timestamp_diff = abs(short_timestamp.to_sec() - steer_timestamp.to_sec())
+        for steer_msg in steer_msgs:
+            steer_timestamp_sec  =  steer_msg[1].header.stamp.sec
+            steer_timestamp_nsec =  steer_msg[1].header.stamp.nanosec*(0.000000001)
+            steer_timestamp      =  steer_timestamp_sec+imu_timestamp_nsec
+            timestamp_diff       = abs(odom_timestamp - steer_timestamp)
 
-            if timestamp_diff < closest_diff2:
+            if timestamp_diff < closest_diff:
                 closest_diff2 = timestamp_diff
-                closest_msg2 = steer_msg
+                closest_steer_msg = steer_msg
 
-            if timestamp_diff > closest_diff2:
+            if timestamp_diff > closest_diff:
                 break
 
-        if closest_msg is not None and closest_msg2 is not None:
-            if closest_msg.topic == topic_1:
-                matching_msgs_topic1.append(closest_msg)
-                matching_msgs_topic2.append(short_msg)
-                matching_msgs_topic3.append(closest_msg2)
-            elif closest_msg.topic == topic_2:
-                matching_msgs_topic1.append(short_msg)
-                matching_msgs_topic2.append(closest_msg)
-                matching_msgs_topic3.append(closest_msg2)
+        if closest_imu_msg is not None and closest_steer_msg is not None:
+                matching_msgs_topic1.append(odom_msg)
+                matching_msgs_topic2.append(closest_imu_msg)
+                matching_msgs_topic3.append(closest_steer_msg)
 
     # Print the number of matching messages found
     print("Found {} matching messages".format(len(matching_msgs_topic1)))
-    # Close the bag file
-    bag.close()
-
+ 
     accel_x = []
     accel_y = []
     vel_x = []
     vel_y = []
     yaw_rate = []
     steer_angle = []
-    for msg in matching_msgs_topic1:
-        # Extract the actual ROS message from the BagMessage object
-        ros_msg = msg.message
-        # Convert ROS message to numpy array and append to list
-        accel_x.append([ros_msg.linear_acceleration.x])
-        accel_y.append([ros_msg.linear_acceleration.y])
-        yaw_rate.append([ros_msg.angular_velocity.z])
-    for msg in matching_msgs_topic2:
-        # Extract the actual ROS message from the BagMessage object
-        ros_msg = msg.message
-        # Convert ROS message to numpy array and append to list
-        vel_x.append([ros_msg.twist.twist.linear.x])
-        vel_y.append([ros_msg.twist.twist.linear.y])
-    for msg in matching_msgs_topic3:
-        ros_msg=msg.message
-        steer_angle.append([ros_msg.drive.steering_angle])
+    for ros_msg in matching_msgs_topic1:
+        vel_x.append([ros_msg[1].twist.twist.linear.x])
+        vel_y.append([ros_msg[1].twist.twist.linear.y])
+    for ros_msg in matching_msgs_topic2:
+        accel_x.append([ros_msg[1].linear_acceleration.x])
+        accel_y.append([ros_msg[1].linear_acceleration.y])
+        yaw_rate.append([ros_msg[1].angular_velocity.z])
+    for ros_msg in matching_msgs_topic3:
+        steer_angle.append([ros_msg[1].drive.steering_angle])
 
     # Convert list to numpy array and reshape to 1D array
     accel_x = np.array(accel_x)
@@ -204,9 +218,6 @@ if __name__ == '__main__':
             vel_y = np.delete(vel_y, i)
             yaw_rate = np.delete(yaw_rate, i)
             steer_angle = np.delete(steer_angle,i)
-
-
-
 
 
     # Define vehicle and tire parameters
