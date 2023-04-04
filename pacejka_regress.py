@@ -242,28 +242,30 @@ if __name__ == '__main__':
     ### regression test with virtual data start ####
     ### regression test with virtual data start ####
     ### regression test with virtual data start ####
-    # alpha_v = np.arange(-0.6, 0.6, 0.01)
-    # mu_v = 1.0
-    # Fz_v = np.full_like(alpha_v, 3.0)
-    # B_vt = 4.0 # vt: virtual true
-    # C_vt = 1.0
-    # D_vt = 1.0
-    # E_vt = 1.0
-    # Fy_v = virtual_data_making(alpha_v, mu_v, Fz_v,B_vt,C_vt,D_vt,E_vt)
-    # B_ve, C_ve, D_ve, E_ve = run_em_algorithm(alpha=alpha_v, Fy=Fy_v, mu=mu_v, Fz=Fz_v, lr=lr, lf=lf, h_cg=h_cg, mass=mass)
-    # print(f"B_vt: {B_vt}, C_vt: {C_vt}, D_vt: {D_vt}, E_vt: {E_vt}")
-    # print(f"B_ve: {B_ve}, C_ve: {C_ve}, D_ve: {D_ve}, E_ve: {E_ve}") # ve: virtual estimation
+    alpha_v = np.arange(-0.6, 0.6, 0.01)
+    mu_v = 1.0
+    Fz_v = np.full_like(alpha_v, 3.0)
+    [B_vt, C_vt, D_vt, E_vt] = [4, 0.8, 0.8, 0.8]
+    # [B_vt, C_vt, D_vt, E_vt] = [3, 1.0, 1.0, 1.0]
+    B_vt = 4.0 # vt: virtual true
+    C_vt = 1.0
+    D_vt = 1.0
+    E_vt = 1.0
+    Fy_v = virtual_data_making(alpha_v, mu_v, Fz_v,B_vt,C_vt,D_vt,E_vt)
+    B_ve, C_ve, D_ve, E_ve = run_em_algorithm(alpha=alpha_v, Fy=Fy_v, mu=mu_v, Fz=Fz_v, lr=lr, lf=lf, h_cg=h_cg, mass=mass)
+    print(f"B_vt: {B_vt}, C_vt: {C_vt}, D_vt: {D_vt}, E_vt: {E_vt}")
+    print(f"B_ve: {B_ve}, C_ve: {C_ve}, D_ve: {D_ve}, E_ve: {E_ve}") # ve: virtual estimation
     ### regression test with virtual data end ###
     ### regression test with virtual data end ###
     ### regression test with virtual data end ###
 
     # Run EM algorithm to estimate tire parameters
-    B_r, C_r, D_r, E_r = run_em_algorithm(alpha=slip_angle_rear, Fy=Fy_true_rear, mu=1.0, Fz=Fz_rear, lr=lr, lf=lf, h_cg=h_cg, mass=mass)
-    B_f, C_f, D_f, E_f = run_em_algorithm(alpha=slip_angle_front, Fy=Fy_true_front, mu=1.0, Fz=Fz_front, lr=lr, lf=lf, h_cg=h_cg, mass=mass)
+    # B_r, C_r, D_r, E_r = run_em_algorithm(alpha=slip_angle_rear, Fy=Fy_true_rear, mu=1.0, Fz=Fz_rear, lr=lr, lf=lf, h_cg=h_cg, mass=mass)
+    # B_f, C_f, D_f, E_f = run_em_algorithm(alpha=slip_angle_front, Fy=Fy_true_front, mu=1.0, Fz=Fz_front, lr=lr, lf=lf, h_cg=h_cg, mass=mass)
 
-    # Print estimated tire parameters
-    print(f"B_r: {B_r}, C_r: {C_r}, D_r: {D_r}, E_r: {E_r}") # r: rear
-    print(f"B_f: {B_f}, C_f: {C_f}, D_f: {D_f}, E_f: {E_f}") # f: front
+    # # Print estimated tire parameters
+    # print(f"B_r: {B_r}, C_r: {C_r}, D_r: {D_r}, E_r: {E_r}") # r: rear
+    # print(f"B_f: {B_f}, C_f: {C_f}, D_f: {D_f}, E_f: {E_f}") # f: front
 
     # Show the figures
     plt.show()    
