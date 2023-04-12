@@ -7,6 +7,9 @@ import rosbag
 from sensor_msgs.msg import Imu
 from nav_msgs.msg import Odometry
 from ackermann_msgs.msg import AckermannDrive
+import os
+
+
 
 # Function to calculate lateral force using Pacejka model
 def pacejka_model(alpha, mu, Fz, B, C, D, E):
@@ -87,76 +90,79 @@ def least_squares(x, alpha, Fy, mu, Fz, lr, lf, h_cg, mass):
     residual = Fy - Fy_hat
     return np.sum(residual ** 2)
 
-
-
 if __name__ == '__main__':
     # Load ROS data
-    bag = rosbag.Bag('/home/shx1/shtest1_2023-04-02-12-55-32.bag')
-    topic_1 = '/imu' 
-    topic_2 = '/vesc/odom'
-    topic_3 = '/vesc/low_level/ackermann_cmd_mux/output' # topic_3 have to contain steering angle.
+    # Directory containing the bag files
+    directory = "/home/shx1/rosbag/0414_pacejka/"
 
-    # Determine the longer and shorter topics
-    length_1 = bag.get_message_count(topic_filters=[topic_1])
-    length_2 = bag.get_message_count(topic_filters=[topic_2])
-
-    if length_1 >= length_2:
-        longer_topic = topic_1
-        shorter_topic = topic_2
-    else:
-        longer_topic = topic_2
-        shorter_topic = topic_1
-
-  # Create lists to store matching messages for different topics
-  # since, frequency of each topic is different.
+    # Find all files in the directory with a ".bag" extension
+    bag_files = [filename for filename in os.listdir(directory) if filename.endswith(".bag")]
+    # Create lists to store matching messages for different topics
+    # since, frequency of each topic is different.
     matching_msgs_topic1 = []
     matching_msgs_topic2 = []
     matching_msgs_topic3 = []
+    for i,val in enumerate(bag_files):
+        bag = rosbag.Bag(directory+bag_files[i])
+        topic_1 = '/imu' 
+        topic_2 = '/tracked_odom'
+        topic_3 = '/vesc/ackermann_cmd' # topic_3 have to contain steering angle.
 
-    for short_msg in bag.read_messages(topics=[shorter_topic]):
-        short_timestamp = short_msg.timestamp
-        closest_diff = float('inf')
-        closest_msg = None
+        # Determine the longer and shorter topics
+        length_1 = bag.get_message_count(topic_filters=[topic_1])
+        length_2 = bag.get_message_count(topic_filters=[topic_2])
 
-        for long_msg in bag.read_messages(topics=[longer_topic],start_time=short_timestamp-rospy.Duration(1)):
-            long_timestamp = long_msg.timestamp
-            timestamp_diff = abs(short_timestamp.to_sec() - long_timestamp.to_sec())
+        if length_1 >= length_2:
+            longer_topic = topic_1
+            shorter_topic = topic_2
+        else:
+            longer_topic = topic_2
+            shorter_topic = topic_1
 
-            if timestamp_diff < closest_diff:
-                closest_diff = timestamp_diff
-                closest_msg = long_msg
+        for short_msg in bag.read_messages(topics=[shorter_topic]):
+            short_timestamp = short_msg.timestamp
+            closest_diff = float('inf')
+            closest_msg = None
 
-            if timestamp_diff > closest_diff:
-                break
+            for long_msg in bag.read_messages(topics=[longer_topic],start_time=short_timestamp-rospy.Duration(1)):
+                long_timestamp = long_msg.timestamp
+                timestamp_diff = abs(short_timestamp.to_sec() - long_timestamp.to_sec())
 
-        closest_diff2 = float('inf')
-        closest_msg2 = None
+                if timestamp_diff < closest_diff:
+                    closest_diff = timestamp_diff
+                    closest_msg = long_msg
 
-        for steer_msg in bag.read_messages(topics=[topic_3],start_time=short_timestamp-rospy.Duration(1)):
-            steer_timestamp = steer_msg.timestamp
-            timestamp_diff = abs(short_timestamp.to_sec() - steer_timestamp.to_sec())
+                if timestamp_diff > closest_diff:
+                    break
 
-            if timestamp_diff < closest_diff2:
-                closest_diff2 = timestamp_diff
-                closest_msg2 = steer_msg
+            closest_diff2 = float('inf')
+            closest_msg2 = None
 
-            if timestamp_diff > closest_diff2:
-                break
+            for steer_msg in bag.read_messages(topics=[topic_3],start_time=short_timestamp-rospy.Duration(1)):
+                steer_timestamp = steer_msg.timestamp
+                timestamp_diff = abs(short_timestamp.to_sec() - steer_timestamp.to_sec())
 
-        if closest_msg is not None and closest_msg2 is not None:
-            if closest_msg.topic == topic_1:
-                matching_msgs_topic1.append(closest_msg)
-                matching_msgs_topic2.append(short_msg)
-                matching_msgs_topic3.append(closest_msg2)
-            elif closest_msg.topic == topic_2:
-                matching_msgs_topic1.append(short_msg)
-                matching_msgs_topic2.append(closest_msg)
-                matching_msgs_topic3.append(closest_msg2)
+                if timestamp_diff < closest_diff2:
+                    closest_diff2 = timestamp_diff
+                    closest_msg2 = steer_msg
 
-    # Print the number of matching messages found
-    print("Found {} matching messages".format(len(matching_msgs_topic1)))
-    # Close the bag file
-    bag.close()
+                if timestamp_diff > closest_diff2:
+                    break
+
+            if closest_msg is not None and closest_msg2 is not None:
+                if closest_msg.topic == topic_1:
+                    matching_msgs_topic1.append(closest_msg)
+                    matching_msgs_topic2.append(short_msg)
+                    matching_msgs_topic3.append(closest_msg2)
+                elif closest_msg.topic == topic_2:
+                    matching_msgs_topic1.append(short_msg)
+                    matching_msgs_topic2.append(closest_msg)
+                    matching_msgs_topic3.append(closest_msg2)
+
+        # Print the number of matching messages found
+        print("Found " + str(len(matching_msgs_topic1)) + " matching messages from " + bag_files[i])
+        # Close the bag file
+        bag.close()
 
     accel_x = []
     accel_y = []
@@ -168,8 +174,8 @@ if __name__ == '__main__':
         # Extract the actual ROS message from the BagMessage object
         ros_msg = msg.message
         # Convert ROS message to numpy array and append to list
-        accel_x.append([ros_msg.linear_acceleration.x])
-        accel_y.append([ros_msg.linear_acceleration.y])
+        accel_x.append([-ros_msg.linear_acceleration.y])
+        accel_y.append([-ros_msg.linear_acceleration.x])
         yaw_rate.append([ros_msg.angular_velocity.z])
     for msg in matching_msgs_topic2:
         # Extract the actual ROS message from the BagMessage object
@@ -205,14 +211,10 @@ if __name__ == '__main__':
             yaw_rate = np.delete(yaw_rate, i)
             steer_angle = np.delete(steer_angle,i)
 
-
-
-
-
     # Define vehicle and tire parameters
-    lr = 0.125
-    lf = 0.125
-    h_cg = 0.2
+    lr = 0.25
+    lf = 0.25
+    h_cg = 0.1
     mass = 3.0
     g = 9.81
     

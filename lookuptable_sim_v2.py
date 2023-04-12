@@ -8,6 +8,7 @@ import matplotlib
 from scipy.interpolate import RegularGridInterpolator
 from mpl_toolkits.mplot3d import Axes3D
 import pickle
+import rospy
 
 def pacejka_model(alpha, mu, Fz, B, C, D, E):
     Fy_hat = mu * Fz * D * np.sin(C * np.arctan(B * alpha - E * (B * alpha - np.arctan(B * alpha))))
@@ -299,23 +300,24 @@ def interpolate_array(array):
     for i in range(array.shape[0]):
         for j in range(1,array.shape[1]):
             # if the value is 0 or NaN, interpolate using 4 nearest neighbors
-            if interpolated_array[i,j] == 0 or np.isnan(interpolated_array[i,j]):
+            # if interpolated_array[i,j] == 0 or np.isnan(interpolated_array[i,j]):
+            if interpolated_array[i,j] == 0 or interpolated_array[i,j] == np.nan:
                 neighbors = []
                 # check the top neighbor
                 if i > 0 :
-                    if array[i-1,j]!=0:
+                    if array[i-1,j]!=0 and array[i-1,j]!=np.nan:
                         neighbors.append(array[i-1,j])
                 # check the bottom neighbor
                 if i < array.shape[0]-1 :
-                    if array[i+1,j]!=0:
+                    if array[i+1,j]!=0 and array[i+1,j]!=np.nan:
                         neighbors.append(array[i+1,j])
                 # check the left neighbor
                 if j > 0 :
-                    if array[i,j-1]!=0:
+                    if array[i,j-1]!=0 and array[i,j-1]!=np.nan:
                         neighbors.append(array[i,j-1])
                 # check the right neighbor
                 if j < array.shape[1]-1 :
-                    if  array[i,j+1]!=0:
+                    if  array[i,j+1]!=0 and array[i,j+1]!=np.nan:
                         neighbors.append(array[i,j+1])
                 # if there are no valid neighbors, skip interpolation for this value
                 if len(neighbors) == 0:
@@ -323,10 +325,28 @@ def interpolate_array(array):
                 # otherwise, take the average of the neighbors
                 else:
                     interpolated_array[i,j] = np.mean(neighbors)
-    
+    # if np.any(np.isnan(interpolated_array)):
+    #    return interpolate_array(interpolated_array)
     return interpolated_array
 
-
+def find_steer(vel,Ac,f):
+    steer_range = np.arange(0.0,0.5,0.001)
+    best_diff=9999
+    for cur_steer in steer_range:
+        if cur_steer ==0:
+            cur_Ac=0
+        else:
+            cur_Ac = f(np.array([vel, cur_steer]))
+        if cur_Ac == np.nan:
+            pass
+        Ac_diff = abs(Ac-cur_Ac)
+        if Ac_diff < best_diff:
+            best_diff = Ac_diff
+            best_steer = cur_steer
+    if best_steer == 9999 or best_diff > 0.1:
+        return np.nan
+    else:
+        return best_steer
 
 if __name__ == '__main__':
     mu = 1.0
@@ -366,8 +386,12 @@ if __name__ == '__main__':
     [Br, Cr, Dr, Er] = [3, 1.0, 1.0, 1.0]
 
     # make look up table
-    test_vel_range = np.arange(1.0,9.01,0.2)
-    test_steer_range = np.arange(0.0,0.41,0.01)
+    test_vel_range = np.arange(0.1,10.0, 0.2)
+    test_steer_range = np.arange(0.0,0.50,0.01)
+    # test_vel_range = np.arange(0.1,10.0, 1.0)
+    # test_steer_range = np.arange(0.0,0.50,0.05)
+    print("test_vel_range: ",test_vel_range)
+    print("test_steer_range: ",test_steer_range)
     vel_len = len(test_vel_range)
     steer_len = len(test_steer_range)
     print("vel_len:", vel_len)
@@ -375,9 +399,7 @@ if __name__ == '__main__':
     assert(vel_len == steer_len)
     # Create the 2D array to store the b values
     Ac_list = np.zeros((len(test_vel_range), len(test_steer_range)))
-    Ac_list_1D = []
 
-    data_list = []
     # create 2D meshgrid of input arrays
     for i, des_vel in enumerate(test_vel_range):
         for j, des_steer in enumerate(test_steer_range):
@@ -398,12 +420,10 @@ if __name__ == '__main__':
             ss_start_idx= 500
             ss_Ac = find_converged_value(Ac,ss_start_idx, ss_threshold, ss_window_width)
             Ac_list[i,j]=ss_Ac
-            Ac_list_1D.append(ss_Ac)
-            data_list.append(np.array([steer, Vx, ss_Ac]))
 
     # plot 
     Ac_list = np.array(Ac_list)
-    Ac_list=interpolate_array(Ac_list) # zero value interpolation
+    # Ac_list=interpolate_array(Ac_list) # zero value interpolation
     X, Y = np.meshgrid(test_vel_range, test_steer_range)
     fig = plt.figure()
     ax = fig.gca(projection='3d')
@@ -411,16 +431,69 @@ if __name__ == '__main__':
     ax.set_xlabel('vel')
     ax.set_ylabel('steer')
     ax.set_zlabel('Ac')
-    print("x:",X.flatten())
+    # print("x:",X.flatten())
+    # plt.show()
+
+    # regression steer model from the simulation
+    f= RegularGridInterpolator((test_vel_range, test_steer_range),Ac_list,method='linear',bounds_error=False,fill_value=np.nan )
+    # f= RegularGridInterpolator((test_vel_range, test_steer_range),Ac_list,method='linear' )
+
+    ### ac = f(np.array([cur_vel,steer])) ##
+    # print(f(np.array([0.1,0.88])))
+
+    # Transform axis of LUT
+    max_Ac = np.max(Ac_list)
+    desired_test_Ac_range_size = vel_len
+    test_Ac_range = np.arange(0.0,max_Ac,max_Ac/desired_test_Ac_range_size)
+    assert(len(test_Ac_range)==desired_test_Ac_range_size)
+    steer_list_1D = []
+    steer_list_2D =np.zeros((vel_len, len(test_Ac_range)))
+    for i,vel in enumerate(test_vel_range):
+        for j,Ac in enumerate(test_Ac_range):
+            # print("vel, Ac: ",vel,Ac)
+            if Ac ==0:
+                target_steer = 0.0
+            else:
+                target_steer = find_steer(vel,Ac,f)
+                
+            steer_list_1D.append(target_steer)
+            steer_list_2D[i,j]=target_steer
+            print("vx, ac , steer: ",vel,Ac,target_steer)
+ 
+    # save LUT to txt file.
+    with open('loouptb.txt', 'w') as f:
+        f.write('vx: ')
+        for i,value in enumerate(test_vel_range):
+            if i == len(test_vel_range)-1:
+                print('{:g}'.format(float(value)), end='\n', file=f)
+            else:
+                print('{:g}'.format(float(value)), end=', ', file=f)
+        f.write('alat: ')
+        for i,value in enumerate(test_Ac_range):
+            if i == len(test_Ac_range)-1:
+                print('{:g}'.format(float(value)), end='\n', file=f)
+            else:
+                print('{:g}'.format(float(value)), end=', ', file=f)
+        f.write('delta: ')
+        for i,value in enumerate(steer_list_1D):
+            if i == len(steer_list_1D)-1:
+                print('{:g}'.format(float(value)), end='\n', file=f)
+            else:
+                print('{:g}'.format(float(value)), end=', ', file=f)
+
+    X, Y = np.meshgrid(test_vel_range[::-1], test_Ac_range)
+    fig = plt.figure()
+    ax = fig.gca(projection='3d')
+    steer_list_2D = np.array(steer_list_2D)
+    # steer_list_2D=interpolate_array(steer_list_2D) # zero value interpolation
+    ax.plot_trisurf(X.flatten(), Y.flatten(), np.array(steer_list_2D).flatten(), cmap='viridis')
+    ax.set_xlabel('vel')
+    ax.set_ylabel('Ac')
+    ax.set_zlabel('Steer')
     plt.show()
-
-    # regression model
-    f= RegularGridInterpolator((test_vel_range, test_steer_range), Ac_list)
-    print(f(np.array([3.22,0.1234])))
-
-    # Save the regressed function as an pkl
-    with open('ac_function.pkl', 'wb') as f_out:
-        pickle.dump(f, f_out)
+    # # Save the regressed function as an pkl
+    # with open('ac_function.pkl', 'wb') as f_out:
+    #     pickle.dump(f, f_out)
 
     
     #####Load the lookup table from the binary file
