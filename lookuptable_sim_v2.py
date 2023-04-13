@@ -7,7 +7,6 @@ from matplotlib.animation import FuncAnimation
 import matplotlib 
 from scipy.interpolate import RegularGridInterpolator
 from mpl_toolkits.mplot3d import Axes3D
-import pickle
 import rospy
 
 def pacejka_model(alpha, mu, Fz, B, C, D, E):
@@ -72,7 +71,7 @@ def steering_constraint(steering_angle, steering_velocity, s_min, s_max, sv_min,
     # print("steering_velocity cmd: ", steering_velocity)
     return steering_velocity
 
-def vehicle_dynamics_st(x, u, mu, lf, lr, h, m, I, Bf ,Cf ,Df ,Ef, Br, Cr, Dr ,Er, s_min, s_max, sv_min, sv_max, v_switch, a_max, v_min, v_max,des_vel,des_steer):
+def vehicle_dynamics_st(x, u, mu, lf, lr, h_cg, mass, Iz, B_f ,C_f ,D_f ,E_f, B_r, C_r, D_r ,E_r, s_min, s_max, sv_min, sv_max, v_switch, a_max, v_min, v_max,des_vel,des_steer):
     """
     Single Track Dynamic Vehicle Dynamics.
 
@@ -94,7 +93,7 @@ def vehicle_dynamics_st(x, u, mu, lf, lr, h, m, I, Bf ,Cf ,Df ,Ef, Br, Cr, Dr ,E
             f (numpy.ndarray): right hand side of differential equations
     """
 
-    # gravity constant m/s^2
+    # gravity constant mass/s^2
     g = 9.81
     Px=x[0]
     Py=x[1]
@@ -120,10 +119,10 @@ def vehicle_dynamics_st(x, u, mu, lf, lr, h, m, I, Bf ,Cf ,Df ,Ef, Br, Cr, Dr ,E
     alphaf = -1*(math.atan2(Vy + lf * psidot, Vx) - steer)
     # alphar = math.atan2(Vy - lr * psidot, Vx)
     alphar = -1*math.atan2(Vy - lr * psidot, Vx)
-    Fzf = (m*g*lr - m*Ax*h) / (lr+lf)
-    Fzr = (m*g*lf + m*Ax*h) / (lr+lf)
-    Fyf = pacejka_model(alphaf, mu, Fzf, Bf, Cf, Df, Ef) 
-    Fyr = pacejka_model(alphar, mu, Fzr, Br, Cr, Dr, Er)
+    Fzf = (mass*g*lr - mass*Ax*h_cg) / (lr+lf)
+    Fzr = (mass*g*lf + mass*Ax*h_cg) / (lr+lf)
+    Fyf = pacejka_model(alphaf, mu, Fzf, B_f, C_f, D_f, E_f) 
+    Fyr = pacejka_model(alphar, mu, Fzr, B_r, C_r, D_r, E_r)
     # print("Fyf: ", Fyf, "Fyr: ", Fyr)
     # print(alphaf,Fzf, Fyf)
     # alpha = math.atan2(math.tan(u[0])*lr/(lr+lf))
@@ -132,9 +131,9 @@ def vehicle_dynamics_st(x, u, mu, lf, lr, h, m, I, Bf ,Cf ,Df ,Ef, Br, Cr, Dr ,E
         [Vx*math.cos(psi)- Vy*math.sin(psi), #0
         Vx*math.sin(psi)+ Vy*math.cos(psi), #1
         psidot, #2
-        Ax+(1/m)*( -1*Fyf*math.sin(steer) + m*Vy*psidot), # Ax, #3
-        (1/m)*(Fyr+Fyf*math.cos(steer)-m*Vx*psidot), # (1/m)*(Fyr+Fyf)-Vx*psidot,#4
-        (1/I)*(Fyf*lf*math.cos(steer)-Fyr*lr), #5
+        Ax+(1/mass)*( -1*Fyf*math.sin(steer) + mass*Vy*psidot), # Ax, #3
+        (1/mass)*(Fyr+Fyf*math.cos(steer)-mass*Vx*psidot), # (1/mass)*(Fyr+Fyf)-Vx*psidot,#4
+        (1/Iz)*(Fyf*lf*math.cos(steer)-Fyr*lr), #5
         steerdot #6
         ])
     
@@ -185,12 +184,12 @@ def pid(speed, steer, current_speed, current_steer, max_sv, max_a, max_v, min_v)
     # print("sv, accel from pid: ", sv, accl)
     return sv, accl
 
-def func_ST(x, t, u, mu, lf, lr, h, m, I, Bf ,Cf ,Df ,Ef, Br, Cr, Dr ,Er, s_min, s_max, sv_min, sv_max, v_switch, a_max, v_min, v_max,des_vel,des_steer):
+def func_ST(x, t, u, mu, lf, lr, h_cg, mass, Iz, B_f ,C_f ,D_f ,E_f, B_r, C_r, D_r ,E_r, s_min, s_max, sv_min, sv_max, v_switch, a_max, v_min, v_max,des_vel,des_steer):
     u1 = pid(des_vel, des_steer, x[3], x[6], sv_max, a_max, v_max, v_min)
     # print("u1: ",u1[0], u1[1])
     u1 = np.array([steering_constraint(x[6], u1[0], s_min, s_max, sv_min, sv_max), accl_constraints(x[3], u1[1], v_switch, a_max, v_min, v_max)])
     # print("u1 constraned: ",u1[0], u1[1])
-    f = vehicle_dynamics_st(x, u1, mu, lf, lr, h, m, I, Bf ,Cf ,Df ,Ef, Br, Cr, Dr ,Er, s_min, s_max, sv_min, sv_max, v_switch, a_max, v_min, v_max,des_vel,des_steer)
+    f = vehicle_dynamics_st(x, u1, mu, lf, lr, h_cg, mass, Iz, B_f ,C_f ,D_f ,E_f, B_r, C_r, D_r ,E_r, s_min, s_max, sv_min, sv_max, v_switch, a_max, v_min, v_max,des_vel,des_steer)
     return f
 
 def update(frame, ax, trajectory):
@@ -263,7 +262,6 @@ def find_converged_value(data, start_idx, threshold, window_width):
     while window_end < len(data):
         # Get the window of data
         window_data = data[window_start:window_end]
-
         # Check if the absolute difference between the maximum and minimum values in the window is below the threshold
         if abs(np.max(window_data) - np.min(window_data)) < threshold:
             # If the values are converging, return the converged value
@@ -278,9 +276,9 @@ def find_converged_value(data, start_idx, threshold, window_width):
     # If the loop completes without finding convergence, return NaN
     return np.nan
 
-def simulate_car(u, mu, lf, lr, h, m, I, Bf ,Cf ,Df ,Ef, Br, Cr, Dr ,Er, s_min, s_max, sv_min, sv_max, v_switch, a_max, v_min, v_max, des_vel,des_steer):
+def simulate_car(u, mu, lf, lr, h_cg, mass, Iz, B_f ,C_f ,D_f ,E_f, B_r, C_r, D_r ,E_r, s_min, s_max, sv_min, sv_max, v_switch, a_max, v_min, v_max, des_vel,des_steer):
     # simulate single-track model
-    x_st = odeint(func_ST, x0_ST, t, args=(u, mu, lf, lr, h, m, I, Bf ,Cf ,Df ,Ef, Br, Cr, Dr ,Er, s_min, s_max, sv_min, sv_max, v_switch, a_max, v_min, v_max, des_vel,des_steer))
+    x_st = odeint(func_ST, x0_ST, t, args=(u, mu, lf, lr, h_cg, mass, Iz, B_f ,C_f ,D_f ,E_f, B_r, C_r, D_r ,E_r, s_min, s_max, sv_min, sv_max, v_switch, a_max, v_min, v_max, des_vel,des_steer))
     return x_st
 
 def interpolate_array(array):
@@ -349,13 +347,24 @@ def find_steer(vel,Ac,f):
         return best_steer
 
 if __name__ == '__main__':
-    mu = 1.0
-    lf = 0.25
-    lr = 0.20
-    h = 0.15
-    m = 3.0
-    I = 0.075
-    g = 9.81
+    with open('pacejka_parameter.txt', 'r') as file:
+        # Initialize an empty dictionary to store the variables
+        variables = {}
+        # Read each line of the file
+        for line in file:
+            # Split the line at the colon to separate the variable name and value
+            name, value = line.strip().split(': ')
+            # Convert the value to an integer or float
+            try:
+                value = int(value)
+            except ValueError:
+                value = float(value)
+            statement = f"{name} = {value}"
+             # Execute thestring using the exec() function
+            exec(statement)
+    # Close the file
+    file.close()
+
     #steering constraints
     s_min = -1.066  #minimum steering angle [rad]
     s_max = 1.066  #maximum steering angle [rad]
@@ -381,9 +390,6 @@ if __name__ == '__main__':
     t = np.arange(t_start, t_final, 1e-2)
     # set input: constant stereing and velocity 
     u = np.array([0.0, 0.0]) # dump value. it does not effect
-    # Pacejka tire model parameter
-    [Bf, Cf, Df, Ef] = [4, 0.8, 0.8, 0.8]
-    [Br, Cr, Dr, Er] = [3, 1.0, 1.0, 1.0]
 
     # make look up table
     test_vel_range = np.arange(0.1,10.0, 0.2)
@@ -403,7 +409,7 @@ if __name__ == '__main__':
     # create 2D meshgrid of input arrays
     for i, des_vel in enumerate(test_vel_range):
         for j, des_steer in enumerate(test_steer_range):
-            x_st = simulate_car(u, mu, lf, lr, h, m, I, Bf ,Cf ,Df ,Ef, Br, Cr, Dr ,Er, s_min, s_max, sv_min, sv_max, v_switch, a_max, v_min, v_max, des_vel,des_steer)          
+            x_st = simulate_car(u, mu, lf, lr, h_cg, mass, Iz, B_f ,C_f ,D_f ,E_f, B_r, C_r, D_r ,E_r, s_min, s_max, sv_min, sv_max, v_switch, a_max, v_min, v_max, des_vel,des_steer)          
             
             # export Ac, steer, Vx
             steer = x_st[:,6]
@@ -415,9 +421,11 @@ if __name__ == '__main__':
             Ac=V*psidot
 
             # determine steady state
-            ss_threshold = 0.0000001
+            ss_threshold = 0.00000001
             ss_window_width = 10
-            ss_start_idx= 500
+            ss_start_idx= 1
+            # uu.... V is not coverge to des_vel.
+            # print("Ac: ",Ac)
             ss_Ac = find_converged_value(Ac,ss_start_idx, ss_threshold, ss_window_width)
             Ac_list[i,j]=ss_Ac
 
@@ -431,19 +439,15 @@ if __name__ == '__main__':
     ax.set_xlabel('vel')
     ax.set_ylabel('steer')
     ax.set_zlabel('Ac')
-    # print("x:",X.flatten())
     # plt.show()
 
     # regression steer model from the simulation
     f= RegularGridInterpolator((test_vel_range, test_steer_range),Ac_list,method='linear',bounds_error=False,fill_value=np.nan )
-    # f= RegularGridInterpolator((test_vel_range, test_steer_range),Ac_list,method='linear' )
-
-    ### ac = f(np.array([cur_vel,steer])) ##
-    # print(f(np.array([0.1,0.88])))
 
     # Transform axis of LUT
-    max_Ac = np.max(Ac_list)
+    max_Ac = np.nanmax(Ac_list)
     desired_test_Ac_range_size = vel_len
+    print("max_Ac :",max_Ac)
     test_Ac_range = np.arange(0.0,max_Ac,max_Ac/desired_test_Ac_range_size)
     assert(len(test_Ac_range)==desired_test_Ac_range_size)
     steer_list_1D = []
@@ -453,12 +457,14 @@ if __name__ == '__main__':
             # print("vel, Ac: ",vel,Ac)
             if Ac ==0:
                 target_steer = 0.0
+            elif Ac==np.nan:
+                target_steer = np.nan
             else:
                 target_steer = find_steer(vel,Ac,f)
                 
             steer_list_1D.append(target_steer)
             steer_list_2D[i,j]=target_steer
-            print("vx, ac , steer: ",vel,Ac,target_steer)
+            # print("vx, ac , steer: ",vel,Ac,target_steer)
  
     # save LUT to txt file.
     with open('loouptb.txt', 'w') as f:
@@ -481,7 +487,7 @@ if __name__ == '__main__':
             else:
                 print('{:g}'.format(float(value)), end=', ', file=f)
 
-    X, Y = np.meshgrid(test_vel_range[::-1], test_Ac_range)
+    X, Y = np.meshgrid(test_vel_range, test_Ac_range)
     fig = plt.figure()
     ax = fig.gca(projection='3d')
     steer_list_2D = np.array(steer_list_2D)

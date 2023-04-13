@@ -10,6 +10,24 @@ from ackermann_msgs.msg import AckermannDrive
 import os
 
 
+#ros bag file parameter
+directory = "/home/shx1/rosbag/0413/"  # Directory containing the bag files
+topic_1 = '/imu/data' 
+topic_2 = '/est_odom' # must contain Vx, Vy
+topic_3 = '/vesc/high_level/ackermann_cmd_mux/input/nav_0' # topic_3 have to contain steering angle.
+
+# EM regression parameter
+EM_iter=3 # Run 3 iterations of EM algorithm
+EM_initial_threshold =5 # outlier removal. EM_thresholad_k = EM_initial_threshold/2^k
+
+# Define vehicle and tire parameters
+lr = 0.25
+lf = 0.25
+h_cg = 0.1
+mass = 3.0
+g = 9.81
+mu=1.0 # any value is fine if you use same mu other code.
+Iz=0.75 # this is not medatory... for later work, i declare Iz here.
 
 # Function to calculate lateral force using Pacejka model
 def pacejka_model(alpha, mu, Fz, B, C, D, E):
@@ -40,46 +58,43 @@ def calculate_true_lateral_force_front(mass, lr, lf, steer_angle, accel_y):
     return (mass * lr / ((lr + lf) * np.cos(steer_angle))) * accel_y
 
 # Function to run EM algorithm and estimate parameters
-def run_em_algorithm(alpha, Fy, mu, Fz, lr, lf, h_cg, mass):
+def run_em_algorithm(alpha, Fy, mu, Fz, lr, lf, h_cg, mass,title):
     # Initialize parameters
-    B = 800.0
-    C = 20.0
-    D = 20.0
-    E = 200.0
+    B = 10.0
+    C = 10.0
+    D = 10.0
+    E = 1.0
 
-    EM_iter=3 # Run 3 iterations of EM algorithm
     outliers_list = np.zeros(len(alpha), dtype=bool)
     
     for i in range(1, EM_iter+1):
-        print("iteration of EM: ",i)
         # Estimate new parameters using least squares
         x0 = np.array([B, C, D, E])
         alpha_inlier = alpha[~outliers_list]
-        print("num outlier: ",outliers_list.shape)
 
         Fy_inlier = Fy[~outliers_list]
         Fz_inlier = Fz[~outliers_list]
         bounds = [(0.1, 12.0), (0.1, 1.5), (0.1, 10.0), (-10.0, 1.1)]  # # Set lower and upper bounds for parameters
         result = minimize(least_squares, x0, args=(alpha_inlier, Fy_inlier, mu, Fz_inlier, lr, lf, h_cg, mass),bounds=bounds)
+        # result = minimize(least_squares, x0, args=(alpha_inlier, Fy_inlier, mu, Fz_inlier, lr, lf, h_cg, mass))
         B, C, D, E = result.x
 
         Fy_hat = pacejka_model(alpha, mu, Fz, B, C, D, E)
         residuals = Fy - Fy_hat
-        threshold = 10 / pow(2, i) # 10 should be tuned properly? 
+        threshold = EM_initial_threshold / pow(2, i) # 10 should be tuned properly? 
         # threshold = 100000
         outliers_list = np.abs(residuals) > threshold
 
-    # Plot results
-    plt.figure()
-    plt.scatter(alpha[outliers_list], Fy[outliers_list], color='red')
-    plt.scatter(alpha[~outliers_list], Fy[~outliers_list], color='green')
-    alpha_range = np.linspace(-0.6, 0.6, 100)
-    Fy_range = pacejka_model(alpha_range, mu, np.mean(Fz), B, C, D, E)
-    plt.plot(alpha_range, Fy_range, color='blue')
-    plt.xlabel('Tire Slip Angle')
-    plt.ylabel('Lateral Force')
-    plt.title('Pacejka Model Regression')
-
+        # Plot results
+        plt.figure()
+        plt.scatter(alpha[outliers_list], Fy[outliers_list], color='red')
+        plt.scatter(alpha[~outliers_list], Fy[~outliers_list], color='green')
+        alpha_range = np.linspace(-0.6, 0.6, 10)
+        Fy_range = pacejka_model(alpha_range, mu, np.mean(Fz), B, C, D, E)
+        plt.plot(alpha_range, Fy_range, color='blue')
+        plt.xlabel('Tire Slip Angle')
+        plt.ylabel('Lateral Force')
+        plt.title('Pacejka Model Regression' + str(i)+title)
     # Return estimated parameters
     return B, C, D, E
 
@@ -92,9 +107,6 @@ def least_squares(x, alpha, Fy, mu, Fz, lr, lf, h_cg, mass):
 
 if __name__ == '__main__':
     # Load ROS data
-    # Directory containing the bag files
-    directory = "/home/shx1/rosbag/0414_pacejka/"
-
     # Find all files in the directory with a ".bag" extension
     bag_files = [filename for filename in os.listdir(directory) if filename.endswith(".bag")]
     # Create lists to store matching messages for different topics
@@ -102,11 +114,9 @@ if __name__ == '__main__':
     matching_msgs_topic1 = []
     matching_msgs_topic2 = []
     matching_msgs_topic3 = []
+    prev_len = 0
     for i,val in enumerate(bag_files):
         bag = rosbag.Bag(directory+bag_files[i])
-        topic_1 = '/imu' 
-        topic_2 = '/tracked_odom'
-        topic_3 = '/vesc/ackermann_cmd' # topic_3 have to contain steering angle.
 
         # Determine the longer and shorter topics
         length_1 = bag.get_message_count(topic_filters=[topic_1])
@@ -160,9 +170,12 @@ if __name__ == '__main__':
                     matching_msgs_topic3.append(closest_msg2)
 
         # Print the number of matching messages found
-        print("Found " + str(len(matching_msgs_topic1)) + " matching messages from " + bag_files[i])
+        total_len = len(matching_msgs_topic1)
+        print("Found " + str(total_len-prev_len) + " matching messages from " + bag_files[i])
         # Close the bag file
+        prev_len = total_len
         bag.close()
+    print("Found " + str(len(matching_msgs_topic1)) + " matching messages from all bagfiles")
 
     accel_x = []
     accel_y = []
@@ -174,8 +187,8 @@ if __name__ == '__main__':
         # Extract the actual ROS message from the BagMessage object
         ros_msg = msg.message
         # Convert ROS message to numpy array and append to list
-        accel_x.append([-ros_msg.linear_acceleration.y])
-        accel_y.append([-ros_msg.linear_acceleration.x])
+        accel_x.append([ros_msg.linear_acceleration.x])
+        accel_y.append([ros_msg.linear_acceleration.y])
         yaw_rate.append([ros_msg.angular_velocity.z])
     for msg in matching_msgs_topic2:
         # Extract the actual ROS message from the BagMessage object
@@ -188,11 +201,11 @@ if __name__ == '__main__':
         steer_angle.append([ros_msg.drive.steering_angle])
 
     # Convert list to numpy array and reshape to 1D array
-    accel_x = np.array(accel_x)
     accel_y = np.array(accel_y)
+    accel_x = np.array(accel_x)
     vel_x = np.array(vel_x)
-    vel_y = np.array(vel_y)
-    yaw_rate = np.array(yaw_rate)
+    vel_y = -np.array(vel_y)
+    yaw_rate = -np.array(yaw_rate)
     steer_angle = np.array(steer_angle)
     accel_x=accel_x.flatten()
     accel_y=accel_y.flatten()
@@ -211,13 +224,7 @@ if __name__ == '__main__':
             yaw_rate = np.delete(yaw_rate, i)
             steer_angle = np.delete(steer_angle,i)
 
-    # Define vehicle and tire parameters
-    lr = 0.25
-    lf = 0.25
-    h_cg = 0.1
-    mass = 3.0
-    g = 9.81
-    
+
     # Calculate tire slip angle using ROS data
     slip_angle_rear = calculate_slip_angle_rear(vel_y, yaw_rate, lr, vel_x)
     slip_angle_front = calculate_slip_angle_front(vel_y, yaw_rate, lf, vel_x,steer_angle)
@@ -249,12 +256,44 @@ if __name__ == '__main__':
     ### regression test with virtual data end ###
 
     # Run EM algorithm to estimate tire parameters
-    B_r, C_r, D_r, E_r = run_em_algorithm(alpha=slip_angle_rear, Fy=Fy_true_rear, mu=1.0, Fz=Fz_rear, lr=lr, lf=lf, h_cg=h_cg, mass=mass)
-    B_f, C_f, D_f, E_f = run_em_algorithm(alpha=slip_angle_front, Fy=Fy_true_front, mu=1.0, Fz=Fz_front, lr=lr, lf=lf, h_cg=h_cg, mass=mass)
+    B_r, C_r, D_r, E_r = run_em_algorithm(alpha=slip_angle_rear, Fy=Fy_true_rear, mu=mu, Fz=Fz_rear, lr=lr, lf=lf, h_cg=h_cg, mass=mass,title=' rear')
+    B_f, C_f, D_f, E_f = run_em_algorithm(alpha=slip_angle_front, Fy=Fy_true_front, mu=mu, Fz=Fz_front, lr=lr, lf=lf, h_cg=h_cg, mass=mass,title=' front')
 
     # Print estimated tire parameters
     print(f"B_r: {B_r}, C_r: {C_r}, D_r: {D_r}, E_r: {E_r}") # r: rear
     print(f"B_f: {B_f}, C_f: {C_f}, D_f: {D_f}, E_f: {E_f}") # f: front
 
+    with open('pacejka_parameter.txt', 'w') as f:
+        f.write('B_r: ')
+        print('{:g}'.format(float(B_r)), end='\n', file=f)
+        f.write('C_r: ')
+        print('{:g}'.format(float(C_r)), end='\n', file=f)
+        f.write('D_r: ')
+        print('{:g}'.format(float(D_r)), end='\n', file=f)
+        f.write('E_r: ')
+        print('{:g}'.format(float(E_r)), end='\n', file=f)
+        f.write('B_f: ')
+        print('{:g}'.format(float(B_f)), end='\n', file=f)
+        f.write('C_f: ')
+        print('{:g}'.format(float(C_f)), end='\n', file=f)
+        f.write('D_f: ')
+        print('{:g}'.format(float(D_f)), end='\n', file=f)
+        f.write('E_f: ')
+        print('{:g}'.format(float(E_f)), end='\n', file=f)
+        f.write('lr: ')
+        print('{:g}'.format(float(lr)), end='\n', file=f)
+        f.write('lf: ')
+        print('{:g}'.format(float(lf)), end='\n', file=f)
+        f.write('h_cg: ')
+        print('{:g}'.format(float(h_cg)), end='\n', file=f)
+        f.write('mass: ')
+        print('{:g}'.format(float(mass)), end='\n', file=f)
+        f.write('g: ')
+        print('{:g}'.format(float(g)), end='\n', file=f)
+        f.write('mu: ')
+        print('{:g}'.format(float(mu)), end='\n', file=f)
+        f.write('Iz: ')
+        print('{:g}'.format(float(Iz)), end='\n', file=f)
+
     # Show the figures
-    plt.show()    
+    # plt.show()    
