@@ -341,12 +341,11 @@ def find_steer(vel,Ac,f):
         if Ac_diff < best_diff:
             best_diff = Ac_diff
             best_steer = cur_steer
-    # if best_steer == 9999 or best_diff > 0.1:
-        # return 0.5 # steer angle does not exist for given vel and Ac. -> can not make sufficient Ac  -> maximize Ac as possible -> max steer
-        # return np.nan
-    # else:
-    if best_steer==9999:
-        return np.nan
+    if best_steer==9999: # i hope this case never happen....
+        print("if you see this message, it's quite bad situation.")
+        print("it means that for given vel, you never have steer angle that converged to steady state in sumulatoin")
+        print("given vel: ",vel)
+        quit()
     return best_steer
 
 if __name__ == '__main__':
@@ -430,11 +429,10 @@ if __name__ == '__main__':
             ss_window_width = 10
             ss_start_idx= 1
             # uu.... V is not coverge to des_vel.
-            # print("Ac: ",Ac)
             ss_Ac = find_converged_value(Ac,ss_start_idx, ss_threshold, ss_window_width)
             Ac_list[i,j]=ss_Ac
 
-    # plot 
+    # for plot 
     Ac_list = np.array(Ac_list)
     # Ac_list=interpolate_array(Ac_list) # zero value interpolation
     X, Y = np.meshgrid(test_vel_range, test_steer_range)
@@ -444,7 +442,6 @@ if __name__ == '__main__':
     ax.set_xlabel('vel')
     ax.set_ylabel('steer')
     ax.set_zlabel('Ac')
-    # plt.show()
 
     # regression steer model from the simulation
     f= RegularGridInterpolator((test_vel_range, test_steer_range),Ac_list,method='linear',bounds_error=False,fill_value=np.nan )
@@ -504,19 +501,3 @@ if __name__ == '__main__':
     ax.set_ylabel('Ac')
     ax.set_zlabel('Steer')
     plt.show()
-    # # Save the regressed function as an pkl
-    # with open('ac_function.pkl', 'wb') as f_out:
-    #     pickle.dump(f, f_out)
-
-    
-    #####Load the lookup table from the binary file
-    #####Load the lookup table from the binary file
-    """
-    import pickle
-
-    # load the interpolation function from a file
-    with open('ac_function.pkl', 'rb') as f_in:
-        f = pickle.load(f_in)
-
-    steer = f(np.array([cur_vel,des_ac]))
-    """
