@@ -21,13 +21,13 @@ EM_iter=3 # Run 3 iterations of EM algorithm
 EM_initial_threshold =5 # outlier removal. EM_thresholad_k = EM_initial_threshold/2^k
 
 # Define vehicle and tire parameters
-lr = 0.25
-lf = 0.25
-h_cg = 0.1
-mass = 3.0
+lr = 0.17
+lf = 0.17
+h_cg = 0.05
+mass = 3.2
 g = 9.81
 mu=1.0 # any value is fine if you use same mu other code.
-Iz=0.75 # this is not medatory... for later work, i declare Iz here.
+Iz=0.128 # this is not medatory... for later work, i declare Iz here.
 
 # Function to calculate lateral force using Pacejka model
 def pacejka_model(alpha, mu, Fz, B, C, D, E):
@@ -296,4 +296,4 @@ if __name__ == '__main__':
         print('{:g}'.format(float(Iz)), end='\n', file=f)
 
     # Show the figures
-    # plt.show()    
+    plt.show()    

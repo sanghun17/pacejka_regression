@@ -341,10 +341,13 @@ def find_steer(vel,Ac,f):
         if Ac_diff < best_diff:
             best_diff = Ac_diff
             best_steer = cur_steer
-    if best_steer == 9999 or best_diff > 0.1:
+    # if best_steer == 9999 or best_diff > 0.1:
+        # return 0.5 # steer angle does not exist for given vel and Ac. -> can not make sufficient Ac  -> maximize Ac as possible -> max steer
+        # return np.nan
+    # else:
+    if best_steer==9999:
         return np.nan
-    else:
-        return best_steer
+    return best_steer
 
 if __name__ == '__main__':
     with open('pacejka_parameter.txt', 'r') as file:
@@ -391,11 +394,13 @@ if __name__ == '__main__':
     # set input: constant stereing and velocity 
     u = np.array([0.0, 0.0]) # dump value. it does not effect
 
-    # make look up table
-    test_vel_range = np.arange(0.1,10.0, 0.2)
-    test_steer_range = np.arange(0.0,0.50,0.01)
-    # test_vel_range = np.arange(0.1,10.0, 1.0)
-    # test_steer_range = np.arange(0.0,0.50,0.05)
+    # make look up table 50x50
+    # test_vel_range = np.arange(0.1,10.0, 0.2)
+    # test_steer_range = np.arange(0.0,0.50,0.01)
+    # make look up table 10x10
+    test_vel_range = np.arange(0.1,10.0, 1.0)
+    test_steer_range = np.arange(0.0,0.50,0.05)
+    
     print("test_vel_range: ",test_vel_range)
     print("test_steer_range: ",test_steer_range)
     vel_len = len(test_vel_range)
@@ -459,9 +464,11 @@ if __name__ == '__main__':
                 target_steer = 0.0
             elif Ac==np.nan:
                 target_steer = np.nan
+                print("case 1")
             else:
                 target_steer = find_steer(vel,Ac,f)
                 
+
             steer_list_1D.append(target_steer)
             steer_list_2D[i,j]=target_steer
             # print("vx, ac , steer: ",vel,Ac,target_steer)
